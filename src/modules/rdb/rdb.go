@@ -14,12 +14,16 @@ import (
 
 	"github.com/didi/nightingale/src/common/loggeri"
 	"github.com/didi/nightingale/src/models"
+	"github.com/didi/nightingale/src/modules/rdb/auth"
+	"github.com/didi/nightingale/src/modules/rdb/cache"
 	"github.com/didi/nightingale/src/modules/rdb/config"
 	"github.com/didi/nightingale/src/modules/rdb/cron"
 	"github.com/didi/nightingale/src/modules/rdb/http"
 	"github.com/didi/nightingale/src/modules/rdb/rabbitmq"
 	"github.com/didi/nightingale/src/modules/rdb/redisc"
+	"github.com/didi/nightingale/src/modules/rdb/session"
 	"github.com/didi/nightingale/src/modules/rdb/ssoc"
+	"github.com/didi/nightingale/src/toolkits/i18n"
 )
 
 var (
@@ -66,17 +70,22 @@ func main() {
 	// 初始化 redis 用来发送邮件短信等
 	redisc.InitRedis()
 	cron.InitWorker()
+	i18n.Init(config.Config.I18n)
 
 	// 初始化 rabbitmq 处理部分异步逻辑
-	if config.Config.RabbitMQ.Enable {
-		rabbitmq.Init(config.Config.RabbitMQ.Addr)
-		go rabbitmq.Consume(config.Config.RabbitMQ.Addr, config.Config.RabbitMQ.Queue)
-	}
+	rabbitmq.Init()
+
+	cache.Start()
+	session.Init()
+
+	auth.Init(config.Config.Auth.ExtraMode)
+	auth.Start()
 
 	go cron.ConsumeMail()
 	go cron.ConsumeSms()
 	go cron.ConsumeVoice()
 	go cron.ConsumeIm()
+	go cron.CleanerLoop()
 
 	http.Start()
 
@@ -101,10 +110,9 @@ func endingProc() {
 	logger.Close()
 	http.Shutdown()
 	redisc.CloseRedis()
+	rabbitmq.Shutdown()
+	session.Stop()
+	cache.Stop()
 
-	if config.Config.RabbitMQ.Enable {
-		rabbitmq.Shutdown()
-	}
-
-	fmt.Println("stopped successfully")
+	fmt.Println("process stopped successfully")
 }

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"xorm.io/xorm"
+
+	"github.com/toolkits/pkg/logger"
 )
 
 type Stra struct {
@@ -18,7 +20,7 @@ type Stra struct {
 	ExclNidStr          string    `xorm:"excl_nid" json:"-"`            //排除的叶子节点
 	AlertDur            int       `json:"alert_dur"`                    //单位秒，持续异常10分钟则产生异常event
 	RecoveryDur         int       `json:"recovery_dur"`                 //单位秒，持续正常2分钟则产生恢复event，0表示立即产生恢复event
-	RecoveryNotify      int       `json:"recovery_notify"`              //0 发送恢复通知 1不发送恢复通知
+	RecoveryNotify      int       `json:"recovery_notify"`              //1 发送恢复通知 0不发送恢复通知
 	ExprsStr            string    `xorm:"exprs" json:"-"`               //多个条件的监控实例需要相同，并且同时满足才产生event
 	TagsStr             string    `xorm:"tags" json:"-"`                //tag过滤条件
 	EnableStime         string    `json:"enable_stime"`                 //策略生效开始时间
@@ -448,47 +450,56 @@ func (s *Stra) Decode() error {
 
 	s.AlertUpgrade, err = AlertUpgradeUnMarshal(s.AlertUpgradeStr)
 	if err != nil {
+		logger.Errorf("decode strategy(%d) on AlertUpgradeStr fail: %v", s.Id, err)
 		return err
 	}
 
 	err = json.Unmarshal([]byte(s.ExclNidStr), &s.ExclNid)
 	if err != nil {
+		logger.Errorf("decode strategy(%d) on ExclNid fail: %v", s.Id, err)
 		return err
 	}
 
 	err = json.Unmarshal([]byte(s.ExprsStr), &s.Exprs)
 	if err != nil {
+		logger.Errorf("decode strategy(%d) on Exprs fail: %v", s.Id, err)
 		return err
 	}
 
 	err = json.Unmarshal([]byte(s.TagsStr), &s.Tags)
 	if err != nil {
+		logger.Errorf("decode strategy(%d) on Tags fail: %v", s.Id, err)
 		return err
 	}
 
 	err = json.Unmarshal([]byte(s.EnableDaysOfWeekStr), &s.EnableDaysOfWeek)
 	if err != nil {
+		logger.Errorf("decode strategy(%d) on EnableDaysOfWeek fail: %v", s.Id, err)
 		return err
 	}
 
 	err = json.Unmarshal([]byte(s.ConvergeStr), &s.Converge)
 	if err != nil {
+		logger.Errorf("decode strategy(%d) on Converge fail: %v", s.Id, err)
 		return err
 	}
 
 	err = json.Unmarshal([]byte(s.NotifyUserStr), &s.NotifyUser)
 	if err != nil {
+		logger.Errorf("decode strategy(%d) on NotifyUser fail: %v", s.Id, err)
 		return err
 	}
 
 	err = json.Unmarshal([]byte(s.NotifyGroupStr), &s.NotifyGroup)
 	if err != nil {
+		logger.Errorf("decode strategy(%d) on NotifyGroup fail: %v", s.Id, err)
 		return err
 	}
 
 	if s.WorkGroupsStr != "" {
 		err = json.Unmarshal([]byte(s.WorkGroupsStr), &s.WorkGroups)
 		if err != nil {
+			logger.Errorf("decode strategy(%d) on WorkGroups fail: %v", s.Id, err)
 			return err
 		}
 	}

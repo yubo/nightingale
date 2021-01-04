@@ -31,6 +31,7 @@ _test
 /build
 /dist
 /etc/*.local.yml
+/etc/plugins/*.local.yml
 /etc/log/log.test.json
 /data*
 /tarball
@@ -54,4 +55,6 @@ _test
 /src/modules/transfer/transfer
 /src/modules/tsdb/tsdb
 
-
+tmp/
+main
+Makefile

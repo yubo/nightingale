@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -9,19 +10,22 @@ import (
 	"github.com/toolkits/pkg/str"
 
 	"github.com/didi/nightingale/src/models"
+	"github.com/didi/nightingale/src/modules/rdb/auth"
 )
 
 // 通讯录，只要登录用户就可以看，超管要修改某个用户的信息，也是调用这个接口获取列表先
 func userListGet(c *gin.Context) {
 	limit := queryInt(c, "limit", 20)
 	query := queryStr(c, "query", "")
+	org := queryStr(c, "org", "")
 	ids := str.IdsInt64(queryStr(c, "ids", ""))
 
-	total, err := models.UserTotal(ids, query)
+	list, total, err := models.UserAndTotalGets(query, org, limit, offset(c, limit), ids)
 	dangerous(err)
 
-	list, err := models.UserGets(ids, query, limit, offset(c, limit))
-	dangerous(err)
+	for i := 0; i < len(list); i++ {
+		list[i].UUID = ""
+	}
 
 	renderData(c, gin.H{
 		"list":  list,
@@ -29,15 +33,32 @@ func userListGet(c *gin.Context) {
 	}, nil)
 }
 
+func v1UserListGet(c *gin.Context) {
+	limit := queryInt(c, "limit", 20)
+	query := queryStr(c, "query", "")
+	org := queryStr(c, "org", "")
+	ids := str.IdsInt64(queryStr(c, "ids", ""))
+
+	list, total, err := models.UserAndTotalGets(query, org, limit, offset(c, limit), ids)
+
+	renderData(c, gin.H{
+		"list":  list,
+		"total": total,
+	}, err)
+}
+
 type userProfileForm struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Dispname string `json:"dispname"`
-	Phone    string `json:"phone"`
-	Email    string `json:"email"`
-	Im       string `json:"im"`
-	IsRoot   int    `json:"is_root"`
-	LeaderId int64  `json:"leader_id"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+	Dispname     string `json:"dispname"`
+	Phone        string `json:"phone"`
+	Email        string `json:"email"`
+	Im           string `json:"im"`
+	IsRoot       int    `json:"is_root"`
+	LeaderId     int64  `json:"leader_id"`
+	Typ          int    `json:"typ"`
+	Status       int    `json:"status"`
+	Organization string `json:"organization"`
 }
 
 func userAddPost(c *gin.Context) {
@@ -45,20 +66,25 @@ func userAddPost(c *gin.Context) {
 
 	var f userProfileForm
 	bind(c, &f)
+	dangerous(auth.CheckPassword(f.Password))
 
 	pass, err := models.CryptoPass(f.Password)
 	dangerous(err)
 
+	now := time.Now().Unix()
+	b, _ := json.Marshal([]string{pass})
 	u := models.User{
-		Username: f.Username,
-		Password: pass,
-		Dispname: f.Dispname,
-		Phone:    f.Phone,
-		Email:    f.Email,
-		Im:       f.Im,
-		IsRoot:   f.IsRoot,
-		LeaderId: f.LeaderId,
-		UUID:     models.GenUUIDForUser(f.Username),
+		Username:  f.Username,
+		Password:  pass,
+		Passwords: string(b),
+		Dispname:  f.Dispname,
+		Phone:     f.Phone,
+		Email:     f.Email,
+		Im:        f.Im,
+		IsRoot:    f.IsRoot,
+		LeaderId:  f.LeaderId,
+		UpdatedAt: now,
+		UUID:      models.GenUUIDForUser(f.Username),
 	}
 
 	if f.LeaderId != 0 {
@@ -74,7 +100,9 @@ func userAddPost(c *gin.Context) {
 }
 
 func userProfileGet(c *gin.Context) {
-	renderData(c, User(urlParamInt64(c, "id")), nil)
+	user := User(urlParamInt64(c, "id"))
+	user.UUID = ""
+	renderData(c, user, nil)
 }
 
 func userProfilePut(c *gin.Context) {
@@ -122,7 +150,27 @@ func userProfilePut(c *gin.Context) {
 		target.IsRoot = f.IsRoot
 	}
 
-	err := target.Update("dispname", "phone", "email", "im", "is_root", "leader_id", "leader_name")
+	if f.Typ != target.Type {
+		arr = append(arr, fmt.Sprintf("typ: %d -> %d", target.Type, f.Typ))
+		target.Type = f.Typ
+	}
+
+	if f.Status != target.Status {
+		arr = append(arr, fmt.Sprintf("typ: %d -> %d", target.Status, f.Status))
+		target.Status = f.Status
+		if target.Status == models.USER_S_ACTIVE {
+			target.LoginErrNum = 0
+		}
+	}
+
+	if f.Organization != target.Organization {
+		arr = append(arr, fmt.Sprintf("organization: %s -> %s", target.Organization, f.Organization))
+		target.Organization = f.Organization
+	}
+
+	target.UpdatedAt = time.Now().Unix()
+
+	err := target.Update("dispname", "phone", "email", "im", "is_root", "leader_id", "leader_name", "typ", "status", "organization", "login_err_num", "updated_at")
 	if err == nil && len(arr) > 0 {
 		content := strings.Join(arr, "，")
 		go models.OperationLogNew(root.Username, "user", target.Id, fmt.Sprintf("UserModify %s %s", target.Username, content))
@@ -140,16 +188,13 @@ func userPasswordPut(c *gin.Context) {
 
 	var f userPasswordForm
 	bind(c, &f)
+	dangerous(auth.CheckPassword(f.Password))
 
-	target := User(urlParamInt64(c, "id"))
+	user := User(urlParamInt64(c, "id"))
+	err := auth.ChangePassword(user, f.Password)
 
-	pass, err := models.CryptoPass(f.Password)
-	dangerous(err)
-
-	target.Password = pass
-	err = target.Update("password")
 	if err == nil {
-		go models.OperationLogNew(root.Username, "user", target.Id, fmt.Sprintf("UserChangePassword %s", target.Username))
+		go models.OperationLogNew(root.Username, "user", user.Id, fmt.Sprintf("UserChangePassword %s", user.Username))
 	}
 	renderMessage(c, err)
 }
@@ -176,10 +221,6 @@ func userDel(c *gin.Context) {
 	}
 
 	renderMessage(c, err)
-}
-
-func v1UsernameGetByUUID(c *gin.Context) {
-	renderData(c, models.UsernameByUUID(queryStr(c, "uuid")), nil)
 }
 
 func v1UserGetByUUID(c *gin.Context) {
@@ -260,24 +301,39 @@ func userInvitePost(c *gin.Context) {
 	var f userInviteForm
 	bind(c, &f)
 
-	inv, err := models.InviteGet("token=?", f.Token)
-	dangerous(err)
+	err := func() error {
+		if err := auth.CheckPassword(f.Password); err != nil {
+			return err
+		}
 
-	if inv.Expire < time.Now().Unix() {
-		dangerous("invite url already expired")
-	}
+		inv, err := models.InviteGet("token=?", f.Token)
+		if err != nil {
+			return err
+		}
 
-	u := models.User{
-		Username: f.Username,
-		Dispname: f.Dispname,
-		Phone:    f.Phone,
-		Email:    f.Email,
-		Im:       f.Im,
-		UUID:     models.GenUUIDForUser(f.Username),
-	}
+		if inv.Expire < time.Now().Unix() {
+			return _e("invite url already expired")
+		}
 
-	u.Password, err = models.CryptoPass(f.Password)
-	dangerous(err)
+		u := models.User{
+			Username: f.Username,
+			Dispname: f.Dispname,
+			Phone:    f.Phone,
+			Email:    f.Email,
+			Im:       f.Im,
+			UUID:     models.GenUUIDForUser(f.Username),
+		}
 
-	renderMessage(c, u.Save())
+		u.Password, err = models.CryptoPass(f.Password)
+		if err != nil {
+			return err
+		}
+		if err = u.Save(); err != nil {
+			return err
+		}
+
+		return inv.Del()
+	}()
+
+	renderMessage(c, err)
 }

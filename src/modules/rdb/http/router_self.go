@@ -2,6 +2,7 @@ package http
 
 import (
 	"github.com/didi/nightingale/src/models"
+	"github.com/didi/nightingale/src/modules/rdb/auth"
 	"github.com/didi/nightingale/src/modules/rdb/config"
 	"github.com/gin-gonic/gin"
 )
@@ -35,27 +36,32 @@ func selfProfilePut(c *gin.Context) {
 }
 
 type selfPasswordForm struct {
-	OldPass string `json:"oldpass" binding:"required"`
-	NewPass string `json:"newpass" binding:"required"`
+	Username string `json:"username" binding:"required"`
+	OldPass  string `json:"oldpass" binding:"required"`
+	NewPass  string `json:"newpass" binding:"required"`
 }
 
 func selfPasswordPut(c *gin.Context) {
 	var f selfPasswordForm
 	bind(c, &f)
 
-	oldpass, err := models.CryptoPass(f.OldPass)
-	dangerous(err)
+	err := func() error {
+		user, err := models.UserMustGet("username=?", f.Username)
+		if err != nil {
+			return err
+		}
+		oldpass, err := models.CryptoPass(f.OldPass)
+		if err != nil {
+			return err
+		}
+		if user.Password != oldpass {
+			return _e("Incorrect old password")
+		}
 
-	newpass, err := models.CryptoPass(f.NewPass)
-	dangerous(err)
+		return auth.ChangePassword(user, f.NewPass)
+	}()
 
-	user := loginUser(c)
-	if user.Password != oldpass {
-		bomb("old password error")
-	}
-
-	user.Password = newpass
-	renderMessage(c, user.Update("password"))
+	renderMessage(c, err)
 }
 
 func selfTokenGets(c *gin.Context) {
@@ -85,6 +91,38 @@ func selfTokenPut(c *gin.Context) {
 
 func permGlobalOps(c *gin.Context) {
 	user := loginUser(c)
+	operations := make(map[string]struct{})
+
+	if user.IsRoot == 1 {
+		for _, system := range config.GlobalOps {
+			for _, group := range system.Groups {
+				for _, op := range group.Ops {
+					operations[op.En] = struct{}{}
+				}
+			}
+		}
+
+		renderData(c, operations, nil)
+		return
+	}
+
+	roleIds, err := models.RoleIdsGetByUserId(user.Id)
+	dangerous(err)
+
+	ops, err := models.OperationsOfRoles(roleIds)
+	dangerous(err)
+
+	for _, op := range ops {
+		operations[op] = struct{}{}
+	}
+
+	renderData(c, operations, err)
+}
+
+func v1PermGlobalOps(c *gin.Context) {
+	user, err := models.UserGet("username=?", queryStr(c, "username"))
+	dangerous(err)
+
 	operations := make(map[string]struct{})
 
 	if user.IsRoot == 1 {

@@ -10,20 +10,29 @@ func Config(r *gin.Engine) {
 	{
 		notLogin.GET("/ping", ping)
 		notLogin.GET("/ldap/used", ldapUsed)
-		notLogin.POST("/auth/login", login)
-		notLogin.GET("/auth/logout", logout)
 		notLogin.GET("/ops/global", globalOpsGet)
 		notLogin.GET("/ops/local", localOpsGet)
 		notLogin.GET("/roles/global", globalRoleGet)
 		notLogin.GET("/roles/local", localRoleGet)
 		notLogin.POST("/users/invite", userInvitePost)
 
-		notLogin.GET("/auth/authorize", authAuthorize)
-		notLogin.GET("/auth/callback", authCallback)
-		notLogin.GET("/auth/settings", authSettings)
+		notLogin.POST("/auth/send-login-code", sendLoginCode)
+		notLogin.POST("/auth/send-rst-code", sendRstCode)
+		notLogin.POST("/auth/rst-password", rstPassword)
+		notLogin.GET("/auth/captcha", captchaGet)
 
-		notLogin.GET("/auth/v2/authorize", authAuthorizeV2)
-		notLogin.GET("/auth/v2/callback", authCallbackV2)
+		notLogin.GET("/v2/nodes", nodeGets)
+		notLogin.GET("/pwd-rules", pwdRulesGet)
+
+	}
+
+	sessionStarted := r.Group("/api/rdb").Use(shouldStartSession())
+	{
+		sessionStarted.POST("/auth/login", login)
+		sessionStarted.GET("/auth/logout", logout)
+		sessionStarted.GET("/auth/v2/authorize", authAuthorizeV2)
+		sessionStarted.GET("/auth/v2/callback", authCallbackV2)
+		sessionStarted.GET("/auth/v2/logout", logoutV2)
 	}
 
 	hbs := r.Group("/api/hbs")
@@ -37,6 +46,14 @@ func Config(r *gin.Engine) {
 		rootLogin.GET("/configs/smtp", smtpConfigsGet)
 		rootLogin.POST("/configs/smtp/test", smtpTest)
 		rootLogin.PUT("/configs/smtp", smtpConfigsPut)
+
+		rootLogin.GET("/configs/auth", authConfigsGet)
+		rootLogin.PUT("/configs/auth", authConfigsPut)
+		rootLogin.POST("/auth/white-list", whiteListPost)
+		rootLogin.GET("/auth/white-list", whiteListsGet)
+		rootLogin.GET("/auth/white-list/:id", whiteListGet)
+		rootLogin.PUT("/auth/white-list/:id", whiteListPut)
+		rootLogin.DELETE("/auth/white-list/:id", whiteListDel)
 
 		rootLogin.GET("/log/login", loginLogGets)
 		rootLogin.GET("/log/operation", operationLogGets)
@@ -78,11 +95,12 @@ func Config(r *gin.Engine) {
 
 		userLogin.GET("/self/profile", selfProfileGet)
 		userLogin.PUT("/self/profile", selfProfilePut)
-		userLogin.PUT("/self/password", selfPasswordPut)
 		userLogin.GET("/self/token", selfTokenGets)
 		userLogin.POST("/self/token", selfTokenPost)
 		userLogin.PUT("/self/token", selfTokenPut)
 		userLogin.GET("/self/perms/global", permGlobalOps)
+
+		notLogin.PUT("/self/password", selfPasswordPut)
 
 		userLogin.GET("/users", userListGet)
 		userLogin.GET("/users/invite", userInviteGet)
@@ -111,9 +129,11 @@ func Config(r *gin.Engine) {
 		userLogin.POST("/node/:id/roles", rolesUnderNodePost)
 		userLogin.DELETE("/node/:id/roles", rolesUnderNodeDel)
 		userLogin.GET("/node/:id/resources", resourceUnderNodeGet)
+		userLogin.GET("/node/:id/resources/cate-count", renderNodeResourcesCountByCate)
 		userLogin.POST("/node/:id/resources/bind", resourceBindNode)
 		userLogin.POST("/node/:id/resources/unbind", resourceUnbindNode)
 		userLogin.PUT("/node/:id/resources/note", resourceUnderNodeNotePut)
+		userLogin.PUT("/node/:id/resources/labels", resourceUnderNodeLabelsPut)
 
 		userLogin.GET("/tree", treeUntilLeafGets)
 		userLogin.GET("/tree/projs", treeUntilProjectGets)
@@ -123,6 +143,7 @@ func Config(r *gin.Engine) {
 		userLogin.GET("/resources/bindings", resourceBindingsGet)
 		userLogin.GET("/resources/orphan", resourceOrphanGet)
 
+		userLogin.GET("/resources/cate-count", renderAllResourcesCountByCate)
 	}
 
 	v1 := r.Group("/v1/rdb").Use(shouldBeService())
@@ -135,6 +156,7 @@ func Config(r *gin.Engine) {
 		v1.POST("/resources/unregister", v1ResourcesUnregisterPost)
 
 		v1.POST("/containers/bind", v1ContainersBindPost)
+		v1.POST("/container/sync", v1ContainerSyncPost)
 
 		// 发送邮件、短信、语音、即时通讯消息，这些都依赖客户那边的通道
 		v1.POST("/sender/mail", v1SendMail)
@@ -144,6 +166,7 @@ func Config(r *gin.Engine) {
 
 		v1.GET("/nodes", nodeGets)
 		v1.GET("/node/:id", nodeGet)
+		v1.GET("/node/:id/projs", v1treeUntilProjectGetsByNid)
 		v1.GET("/tree/projs", v1TreeUntilProjectGets)
 
 		// 外部系统推送一些操作日志过来，RDB统一存储，实际用MQ会更好一些
@@ -157,7 +180,6 @@ func Config(r *gin.Engine) {
 		v1.GET("/can-do-node-ops", v1CandoNodeOps)
 
 		// 获取用户、团队相关信息
-		v1.GET("/get-username-by-uuid", v1UsernameGetByUUID)
 		v1.GET("/get-user-by-uuid", v1UserGetByUUID)
 		v1.GET("/get-users-by-uuids", v1UserGetByUUIDs)
 		v1.GET("/get-users-by-ids", v1UserGetByIds)
@@ -167,8 +189,21 @@ func Config(r *gin.Engine) {
 		v1.GET("/get-teams-by-ids", v1TeamGetByIds)
 		v1.GET("/get-user-ids-by-team-ids", v1UserIdsGetByTeamIds)
 
-		v1.GET("/users", userListGet)
+		v1.GET("/users", v1UserListGet)
 
 		v1.POST("/login", v1Login)
+		v1.POST("/send-login-code", sendLoginCode)
+
+		// 第三方系统获取某个用户的所有权限点
+		v1.GET("/perms/global", v1PermGlobalOps)
+
+		// session
+		v1.GET("/sessions/:sid", v1SessionGet)
+		v1.GET("/sessions/:sid/user", v1SessionGetUser)
+		v1.DELETE("/sessions/:sid", v1SessionDelete)
+
+		// 第三方系统同步权限表的数据
+		v1.GET("/table/sync/role-operation", v1RoleOperationGets)
+		v1.GET("/table/sync/role-global-user", v1RoleGlobalUserGets)
 	}
 }

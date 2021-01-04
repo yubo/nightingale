@@ -1,12 +1,13 @@
 package http
 
 import (
+	"fmt"
 	"strconv"
 
+	"github.com/didi/nightingale/src/models"
+	"github.com/didi/nightingale/src/toolkits/i18n"
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/errors"
-
-	"github.com/didi/nightingale/src/models"
 )
 
 func dangerous(v interface{}) {
@@ -14,7 +15,7 @@ func dangerous(v interface{}) {
 }
 
 func bomb(format string, a ...interface{}) {
-	errors.Bomb(format, a...)
+	errors.Bomb(i18n.Sprintf(format, a...))
 }
 
 func bind(c *gin.Context, ptr interface{}) {
@@ -109,7 +110,7 @@ func renderMessage(c *gin.Context, v interface{}) {
 
 	switch t := v.(type) {
 	case string:
-		c.JSON(200, gin.H{"err": t})
+		c.JSON(200, gin.H{"err": i18n.Sprintf(t)})
 	case error:
 		c.JSON(200, gin.H{"err": t.Error()})
 	}
@@ -131,13 +132,9 @@ func renderZeroPage(c *gin.Context) {
 	}, nil)
 }
 
-// ------------
-
 type idsForm struct {
 	Ids []int64 `json:"ids"`
 }
-
-// ------------
 
 func loginUsername(c *gin.Context) string {
 	value, has := c.Get("username")
@@ -218,8 +215,16 @@ func Node(id int64) *models.Node {
 	dangerous(err)
 
 	if node == nil {
-		bomb("no such node[id:%d]", id)
+		bomb("no such node[%d]", id)
 	}
 
 	return node
+}
+
+func _e(format string, a ...interface{}) error {
+	return fmt.Errorf(i18n.Sprintf(format, a...))
+}
+
+func _s(format string, a ...interface{}) string {
+	return i18n.Sprintf(format, a...)
 }
