@@ -23,6 +23,7 @@ import (
 	"github.com/didi/nightingale/src/modules/rdb/cache"
 	"github.com/didi/nightingale/src/modules/rdb/config"
 	"github.com/didi/nightingale/src/modules/rdb/redisc"
+	"github.com/didi/nightingale/src/modules/rdb/session"
 	"github.com/didi/nightingale/src/modules/rdb/ssoc"
 )
 
@@ -30,9 +31,6 @@ var (
 	loginCodeSmsTpl     *template.Template
 	loginCodeEmailTpl   *template.Template
 	errUnsupportCaptcha = errors.New("unsupported captcha")
-
-	// TODO: set false
-	debug = true
 
 	// https://captcha.mojotv.cn
 	captchaDirver = base64Captcha.DriverString{
@@ -169,8 +167,8 @@ func authCallbackV2(c *gin.Context) {
 	}
 
 	ret, err := ssoc.Callback(code, state)
+	logger.Debugf("sso.callback() ret %s error %v", ret, err)
 	if err != nil {
-		logger.Debugf("sso.callback() error %s", err)
 		renderData(c, nil, err)
 		return
 	}
@@ -278,10 +276,6 @@ func authLogin(in *v1LoginInput) (user *models.User, err error) {
 	if err = in.Validate(); err != nil {
 		return
 	}
-
-	if err := auth.WhiteListAccess(in.RemoteAddr); err != nil {
-		return nil, _e("Deny Access from %s with whitelist control", in.RemoteAddr)
-	}
 	defer func() {
 		models.LoginLogNew(in.Args[0], in.RemoteAddr, "in", err)
 	}()
@@ -297,6 +291,12 @@ func authLogin(in *v1LoginInput) (user *models.User, err error) {
 		user, err = models.EmailCodeLogin(in.Args[0], in.Args[1])
 	default:
 		err = _e("Invalid login type %s", in.Type)
+	}
+
+	if user != nil {
+		if err := auth.WhiteListAccess(user, in.RemoteAddr); err != nil {
+			return nil, _e("Deny Access from %s with whitelist control", in.RemoteAddr)
+		}
 	}
 
 	if err = auth.PostLogin(user, err); err != nil {
@@ -382,7 +382,7 @@ func sendLoginCode(c *gin.Context) {
 			return "", err
 		}
 
-		if debug {
+		if config.Config.Auth.ExtraMode.Debug {
 			return fmt.Sprintf("[debug]: %s", buf.String()), nil
 		}
 
@@ -454,7 +454,7 @@ func sendRstCode(c *gin.Context) {
 			return "", err
 		}
 
-		if debug {
+		if config.Config.Auth.ExtraMode.Debug {
 			return fmt.Sprintf("[debug] msg: %s", buf.String()), nil
 		}
 
@@ -704,7 +704,7 @@ func v1SessionGetUser(c *gin.Context) {
 func v1SessionDelete(c *gin.Context) {
 	sid := urlParamStr(c, "sid")
 	logger.Debugf("session del sid %s", sid)
-	renderMessage(c, models.SessionDeleteWithCache(sid))
+	renderMessage(c, auth.DeleteSession(sid))
 }
 
 func v1TokenGet(c *gin.Context) {
@@ -730,14 +730,24 @@ func v1TokenGetUser(c *gin.Context) {
 	renderData(c, user, err)
 }
 
+// just for auth.extraMode
 func v1TokenDelete(c *gin.Context) {
 	token := urlParamStr(c, "token")
 	logger.Debugf("del token %s", token)
-	renderMessage(c, models.TokenDeleteWithCache(token))
+
+	renderMessage(c, auth.DeleteToken(token))
 }
 
 // pwdRulesGet return pwd rules
 func pwdRulesGet(c *gin.Context) {
 	cf := cache.AuthConfig()
 	renderData(c, cf.PwdRules(), nil)
+}
+
+func sessionDestory(c *gin.Context) (sid string, err error) {
+	if sid, err = session.Destroy(c.Writer, c.Request); sid != "" {
+		auth.DeleteSession(sid)
+	}
+
+	return
 }

@@ -12,8 +12,8 @@ func Init(cf config.AuthExtraSection) {
 	defaultAuth = *New(cf)
 }
 
-func WhiteListAccess(remoteAddr string) error {
-	return defaultAuth.WhiteListAccess(remoteAddr)
+func WhiteListAccess(user *models.User, remoteAddr string) error {
+	return defaultAuth.WhiteListAccess(user, remoteAddr)
 }
 
 // PostLogin check user status after login
@@ -31,6 +31,14 @@ func CheckPassword(password string) error {
 
 func PostCallback(in *ssoc.CallbackOutput) error {
 	return defaultAuth.PostCallback(in)
+}
+
+func DeleteSession(sid string) error {
+	return defaultAuth.DeleteSession(sid)
+}
+
+func DeleteToken(accessToken string) error {
+	return defaultAuth.DeleteToken(accessToken)
 }
 
 func Start() error {

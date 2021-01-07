@@ -18,12 +18,14 @@ import (
 
 const (
 	ChangePasswordURL = "/change-password"
+	loginModeFifo     = true
 )
 
 type Authenticator struct {
 	extraMode     bool
 	whiteList     bool
 	debug         bool
+	debugUser     string
 	frozenTime    int64
 	writenOffTime int64
 	userExpire    bool
@@ -42,21 +44,18 @@ func New(cf config.AuthExtraSection) *Authenticator {
 		extraMode:     true,
 		whiteList:     cf.WhiteList,
 		debug:         cf.Debug,
+		debugUser:     cf.DebugUser,
 		frozenTime:    86400 * int64(cf.FrozenDays),
 		writenOffTime: 86400 * int64(cf.WritenOffDays),
 	}
 }
 
-func (p *Authenticator) WhiteListAccess(remoteAddr string) error {
-	if !p.whiteList {
+func (p *Authenticator) WhiteListAccess(user *models.User, remoteAddr string) error {
+	if !p.extraMode || !p.whiteList || (p.debug && user.Username != p.debugUser) {
 		return nil
 	}
-	if err := models.WhiteListAccess(remoteAddr); err != nil {
-		if p.debug {
-			logger.Debugf("WhiteListAccess err %s", err)
-			return nil
-		}
 
+	if err := models.WhiteListAccess(remoteAddr); err != nil {
 		return err
 	}
 	return nil
@@ -74,7 +73,7 @@ func (p *Authenticator) PostLogin(user *models.User, loginErr error) (err error)
 		user.Update("status", "login_err_num", "locked_at", "updated_at", "logged_at")
 	}()
 
-	if !p.extraMode || user == nil {
+	if !p.extraMode || user == nil || (p.debug && user.Username != p.debugUser) {
 		err = loginErr
 		return
 	}
@@ -183,7 +182,7 @@ func (p *Authenticator) CheckPassword(password string) error {
 
 // PostCallback between sso.Callback() and sessionLogin()
 func (p *Authenticator) PostCallback(in *ssoc.CallbackOutput) error {
-	if !p.extraMode {
+	if !p.extraMode || (p.debug && in.User.Username != p.debugUser) {
 		return nil
 	}
 
@@ -200,6 +199,7 @@ func (p *Authenticator) PostCallback(in *ssoc.CallbackOutput) error {
 
 		if n := len(tokens); n > maxCnt {
 			for i := maxCnt; i < n; i++ {
+				logger.Debugf("[over limit] delete session by token %s %s", tokens[i].UserName, tokens[i].AccessToken)
 				deleteSessionByToken(&tokens[i])
 			}
 		}
@@ -211,10 +211,9 @@ func (p *Authenticator) PostCallback(in *ssoc.CallbackOutput) error {
 // ChangePasswordRedirect check user should change password before login
 // return err when need changePassword
 func (p *Authenticator) changePasswordRedirect(in *ssoc.CallbackOutput, cf *models.AuthConfig) (err error) {
-
 	if in.User.PwdUpdatedAt == 0 {
 		err = _e("First Login, please change the password in time")
-	} else if in.User.PwdUpdatedAt+cf.PwdExpiresIn*86400*30 < time.Now().Unix() {
+	} else if cf.PwdExpiresIn > 0 && in.User.PwdUpdatedAt+cf.PwdExpiresIn*86400*30 < time.Now().Unix() {
 		err = _e("Password expired, please change the password in time")
 	}
 
@@ -228,6 +227,31 @@ func (p *Authenticator) changePasswordRedirect(in *ssoc.CallbackOutput, cf *mode
 		in.Redirect = ChangePasswordURL + "?" + v.Encode()
 	}
 	return
+}
+
+func (p *Authenticator) DeleteSession(sid string) error {
+	s, err := models.SessionGet(sid)
+	if err != nil {
+		return err
+	}
+
+	if !p.extraMode {
+		pkgcache.Delete("sid." + s.Sid)
+		models.SessionDelete(s.Sid)
+		return nil
+	}
+	return deleteSession(s)
+}
+
+func (p *Authenticator) DeleteToken(accessToken string) error {
+	if !p.extraMode {
+		return nil
+	}
+	token, err := models.TokenGet(accessToken)
+	if err != nil {
+		return err
+	}
+	return deleteSessionByToken(token)
 }
 
 func (p *Authenticator) Stop() error {
@@ -287,7 +311,11 @@ func (p *Authenticator) cleanupSession() {
 		logger.Debugf("find %d idle sessions that should be clean up", len(sessions))
 
 		for _, s := range sessions {
-			logger.Debugf("deleteSession %s %s", s.Username, s.Sid)
+			if p.debug && s.Username != p.debugUser {
+				continue
+			}
+
+			logger.Debugf("[idle] deleteSession %s %s", s.Username, s.Sid)
 			deleteSession(&s)
 		}
 	}
@@ -310,7 +338,10 @@ func (p *Authenticator) cleanupSession() {
 
 			cnt++
 			if cnt > maxCnt {
-				logger.Debugf("deleteSessionByToken %s %sidx %d max %d", token.UserName, token.AccessToken, cnt, maxCnt)
+				if p.debug && token.UserName != p.debugUser {
+					continue
+				}
+				logger.Debugf("[over limit] deleteSessionByToken %s %s idx %d max %d", token.UserName, token.AccessToken, cnt, maxCnt)
 				deleteSessionByToken(&token)
 			}
 		}
@@ -365,7 +396,7 @@ func activeUserAccess(cf *models.AuthConfig, user *models.User, loginErr error) 
 	user.LoginErrNum = 0
 	user.UpdatedAt = now
 
-	if cf.MaxSessionNumber > 0 {
+	if cf.MaxSessionNumber > 0 && !loginModeFifo {
 		if n, err := models.SessionUserAll(user.Username); err != nil {
 			return err
 		} else if n >= cf.MaxSessionNumber {
@@ -373,18 +404,6 @@ func activeUserAccess(cf *models.AuthConfig, user *models.User, loginErr error) 
 		}
 	}
 
-	if cf.PwdExpiresIn > 0 && user.PwdUpdatedAt > 0 {
-		// debug account
-		// TODO: remove me
-		if user.Username == "Demo.2022" {
-			if now-user.PwdUpdatedAt > cf.PwdExpiresIn*60 {
-				return _e("Password has been expired")
-			}
-		}
-		if now-user.PwdUpdatedAt > cf.PwdExpiresIn*30*86400 {
-			return _e("Password has been expired")
-		}
-	}
 	return nil
 }
 func inactiveUserAccess(cf *models.AuthConfig, user *models.User, loginErr error) error {
@@ -469,20 +488,23 @@ func checkPassword(cf *models.AuthConfig, passwd string) error {
 	return nil
 }
 
-func deleteSession(s *models.Session) {
+func deleteSession(s *models.Session) error {
 	pkgcache.Delete("sid." + s.Sid)
-	pkgcache.Delete("access-token." + s.AccessToken)
 	models.SessionDelete(s.Sid)
+	pkgcache.Delete("access-token." + s.AccessToken)
 	models.TokenDelete(s.AccessToken)
+	return nil
 }
 
-func deleteSessionByToken(t *models.Token) {
+func deleteSessionByToken(t *models.Token) error {
 	if s, _ := models.SessionGetByToken(t.AccessToken); s != nil {
 		deleteSession(s)
 	} else {
 		pkgcache.Delete("access-token." + t.AccessToken)
 		models.TokenDelete(t.AccessToken)
 	}
+
+	return nil
 }
 
 func _e(format string, a ...interface{}) error {

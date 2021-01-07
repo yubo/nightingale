@@ -27,7 +27,6 @@ func shouldBeLogin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sessionStart(c)
 		username := mustUsername(c)
-		logger.Debugf("set username %s", username)
 		c.Set("username", username)
 		c.Next()
 		sessionUpdate(c)
@@ -135,14 +134,6 @@ func sessionUpdate(c *gin.Context) {
 			logger.Errorf("session update err %s", err)
 		}
 	}
-}
-
-func sessionDestory(c *gin.Context) (sid string, err error) {
-	if sid, err = session.Destroy(c.Writer, c.Request); sid != "" {
-		models.SessionDeleteWithCache(sid)
-	}
-
-	return
 }
 
 func sessionUsername(c *gin.Context) string {
