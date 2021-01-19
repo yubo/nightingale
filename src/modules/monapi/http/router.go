@@ -20,6 +20,11 @@ func Config(r *gin.Engine) {
 		sys.GET("/addr", addr)
 	}
 
+	generic := r.Group("/api/mon").Use(GetCookieUser())
+	{
+		generic.GET("/regions", func(c *gin.Context) { renderData(c, config.Get().Region, nil) })
+	}
+
 	node := r.Group("/api/mon/node").Use(GetCookieUser())
 	{
 		node.GET("/:id/maskconf", maskconfGets)
@@ -104,7 +109,7 @@ func Config(r *gin.Engine) {
 	collectRules := r.Group("/api/mon/collect-rules").Use(GetCookieUser())
 	{
 		collectRules.POST("", collectRulePost)                            // create a collect rule
-		collectRules.GET("/list", collectRulesGet)                        // get collect rules
+		collectRules.GET("/list", collectRulesGetV2)                      // get collect rules
 		collectRules.GET("", collectRuleGet)                              // get collect rule by type & id
 		collectRules.PUT("", collectRulePut)                              // update collect rule by type & id
 		collectRules.DELETE("", collectsRuleDel)                          // delete collect rules by type & ids
@@ -142,6 +147,12 @@ func Config(r *gin.Engine) {
 		aggr.DELETE("", aggrCalcsDel)
 		aggr.GET("", aggrCalcsGet)
 		aggr.GET("/:id", aggrCalcGet)
+	}
+
+	tpl := r.Group("/api/mon/tpl")
+	{
+		tpl.GET("", tplNameGets)
+		tpl.GET("/content", tplGet)
 	}
 
 	aggrs := r.Group("/api/mon/aggrs").Use()
