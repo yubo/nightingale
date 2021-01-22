@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -197,29 +196,15 @@ func fieldType(t reflect.Type, in *Field, definitions map[string][]Field) {
 		t = t.Elem()
 	}
 
-	var def interface{}
-
 	switch t.Kind() {
 	case reflect.Int, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint32, reflect.Uint64:
 		in.Type = "integer"
-		if in.def != "" {
-			def, _ = strconv.ParseInt(in.def, 10, 64)
-		}
 	case reflect.Float32, reflect.Float64:
 		in.Type = "float"
-		if in.def != "" {
-			def, _ = strconv.ParseFloat(in.def, 64)
-		}
 	case reflect.Bool:
 		in.Type = "boolean"
-		if in.def != "" {
-			def = in.def == "true"
-		}
 	case reflect.String:
 		in.Type = "string"
-		if in.def != "" {
-			def = in.def
-		}
 	case reflect.Struct:
 		name := t.String()
 		if _, ok := definitions[name]; !ok {
@@ -244,17 +229,8 @@ func fieldType(t reflect.Type, in *Field, definitions map[string][]Field) {
 		} else {
 			panic(fmt.Sprintf("unspport type %s items %s", t.String(), t2.String()))
 		}
-		if t2.Kind() == reflect.String && in.def != "" {
-			var s []string
-			json.Unmarshal([]byte(in.def), &s)
-			def = s
-		}
 	default:
 		panic(fmt.Sprintf("unspport type %s", t.String()))
 		// in.Type = "string"
-	}
-
-	if def != nil {
-		in.Default = def
 	}
 }
