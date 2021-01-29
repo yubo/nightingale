@@ -93,6 +93,10 @@ func (p *collectRule) prepareMetrics() (metrics []*dataobj.MetricValue, err erro
 		return
 	}
 
+	if pluginConfig.Mode == config.PluginModeWhitelist && len(pluginConfig.Metrics) == 0 {
+		return
+	}
+
 	vars := map[string]*dataobj.MetricValue{}
 	for _, v := range metrics {
 		logger.Debugf("get v[%s] %f", v.Metric, v.Value)
