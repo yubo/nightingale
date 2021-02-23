@@ -1,11 +1,10 @@
 package prometheus
 
 import (
-	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/didi/nightingale/src/common/dataobj"
 	"github.com/didi/nightingale/src/modules/prober/manager"
@@ -48,48 +47,10 @@ test_guauge{label="3"} 1.3
 `
 
 func TestCollect(t *testing.T) {
-	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintf(w, sampleTextFormat) })
-	server := &http.Server{Addr: ":18080"}
-	go func() {
-		server.ListenAndServe()
-	}()
-	defer server.Shutdown(context.Background())
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprintf(w, sampleTextFormat) }))
+	defer s.Close()
 
-	time.Sleep(time.Millisecond * 100)
-
-	PluginTest(t, &PrometheusRule{
-		URLs: []string{"http://localhost:18080/metrics"},
+	plugins.PluginTest(t, &PrometheusRule{
+		URLs: []string{s.URL},
 	})
-}
-
-type telegrafPlugin interface {
-	TelegrafInput() (telegraf.Input, error)
-}
-
-func PluginTest(t *testing.T, plugin telegrafPlugin) telegraf.Input {
-	input, err := plugin.TelegrafInput()
-	if err != nil {
-		t.Error(err)
-	}
-
-	PluginInputTest(t, input)
-
-	return input
-}
-
-func PluginInputTest(t *testing.T, input telegraf.Input) {
-	metrics := []*dataobj.MetricValue{}
-
-	acc, err := manager.NewAccumulator(manager.AccumulatorOptions{Name: "plugin-test", Metrics: &metrics})
-	if err != nil {
-		t.Error(err)
-	}
-
-	if err = input.Gather(acc); err != nil {
-		t.Error(err)
-	}
-
-	for k, v := range metrics {
-		t.Logf("%d %s %s %f", k, v.CounterType, v.PK(), v.Value)
-	}
 }
