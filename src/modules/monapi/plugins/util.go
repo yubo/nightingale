@@ -3,7 +3,11 @@ package plugins
 import (
 	"fmt"
 	"reflect"
+	"testing"
 
+	"github.com/didi/nightingale/src/common/dataobj"
+	"github.com/didi/nightingale/src/modules/prober/manager"
+	"github.com/influxdata/telegraf"
 	"github.com/toolkits/pkg/logger"
 )
 

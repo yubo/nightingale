@@ -6,9 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/didi/nightingale/src/common/dataobj"
-	"github.com/didi/nightingale/src/modules/prober/manager"
-	"github.com/influxdata/telegraf"
+	"github.com/didi/nightingale/src/modules/monapi/plugins"
 )
 
 const sampleTextFormat = `# HELP test_metric An untyped metric with a timestamp
