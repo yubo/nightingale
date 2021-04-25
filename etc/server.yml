@@ -54,6 +54,27 @@ rdb:
     autoRegist: true
     tls: false
     startTLS: false
+  sender:
+    mail:
+      # three choice: smtp|shell|api
+      way: smtp
+      worker: 10
+      api: http://127.0.0.1:2008/mail
+    sms:
+      # two choice: shell|api
+      way: api
+      worker: 10
+      api: http://127.0.0.1:2008/sms
+    voice:
+      # two choice: shell|api
+      way: shell
+      worker: 10
+      api: http://127.0.0.1:2008/voice
+    im:
+      # five choice: shell|api|wechat|wechat_robot|dingtalk_robot
+      way: shell
+      worker: 10
+      api: http://127.0.0.1:2008/im
   ## for enterprise edition
   #sso:
   #  enable: false
@@ -99,9 +120,13 @@ transfer:
       seriesLimit: 0
       docsLimit: 0
       daysLimit: 7                               # max query time
+
       # https://m3db.github.io/m3/m3db/architecture/consistencylevels/
       writeConsistencyLevel: "majority"          # one|majority|all
       readConsistencyLevel: "unstrict_majority"  # one|unstrict_majority|majority|all
+      writeTimeout: 5s
+      fetchTimeout: 5s
+      connectTimeout: 5s
       config:
         service:
           # KV environment, zone, and service from which to write/read KV data (placement
@@ -170,3 +195,8 @@ judge:
     callTimeout:      2000
     indexCallTimeout: 2000
     indexMod:         server
+
+wechat:
+  corp_id: "xxxxxxxxxxxxx"
+  agent_id: 1000000
+  secret: "xxxxxxxxxxxxxxxxx"
